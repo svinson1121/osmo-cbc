@@ -95,8 +95,13 @@ the skeletons, with git possibily showing changes in the following paths:
 - src/sbcap/skel/
 
 
-##Updates:
+- Updates:
 * added CORS support to the rest API
 * fixed typo "tsuname" -> tsunami in rest api 
-* Chanhge out put of Msgid and SerNo of show messages cbc/etws from  HEX to DEC.
+* Chanhge output of Msgid and SerNo of "show messages cbc/etws" from  HEX to DEC
+  
 @svinson1121
+
+- Todo:
+  * Add support in the API for PLMN and TAC in scope, so we can send alerts to a group of TACs or a specific PLMN
+  * bug?  can't send a update to a message by incrementing the serial udate number. 
