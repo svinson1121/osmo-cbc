@@ -117,7 +117,7 @@ static void dump_one_cbc_msg(struct vty *vty, const struct cbc_message *cbc_msg)
 		OSMO_STRLCPY_ARRAY(str_expired, "active");
 	}
 
-	vty_out(vty, "| %04X| %04X|%-20s|%-13s|  %-4u|%c| %02x|%-20s|%-20s|%s",
+	vty_out(vty, "|%5u|%5u|%-20s|%-13s|  %-4u|%c| %02x|%-20s|%-20s|%s",
 		smscb->message_id, smscb->serial_nr, cbc_msg->cbe_name,
 		get_value_string(cbsp_category_names, cbc_msg->priority), cbc_msg->rep_period,
 		cbc_msg->extended_cbch ? 'E' : 'N', smscb->cbs.dcs,

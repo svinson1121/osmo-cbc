@@ -98,5 +98,5 @@ the skeletons, with git possibily showing changes in the following paths:
 ##Updates:
 * added CORS support to the rest API
 * fixed typo "tsuname" -> tsunami in rest api 
-
+* Chanhge out put of Msgid and SerNo of show messages cbc/etws from  HEX to DEC.
 @svinson1121
