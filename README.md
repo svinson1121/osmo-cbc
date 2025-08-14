@@ -94,3 +94,9 @@ the skeletons, with git possibily showing changes in the following paths:
 - src/sbcap/gen/
 - src/sbcap/skel/
 
+
+##Updates:
+* added CORS support to the rest API
+* fixed typo "tsuname" -> tsunami in rest api 
+
+@svinson1121

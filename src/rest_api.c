@@ -42,6 +42,25 @@
 #include <osmocom/cbc/cbc_data.h>
 #include <osmocom/cbc/rest_it_op.h>
 
+
+
+
+void add_cors_headers(struct _u_response *resp) {
+    ulfius_add_header_to_response(resp, "Access-Control-Allow-Origin", "*");
+    ulfius_add_header_to_response(resp, "Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    ulfius_add_header_to_response(resp, "Access-Control-Allow-Headers", "Content-Type, Authorization");
+    ulfius_add_header_to_response(resp, "Access-Control-Allow-Credentials", "true");
+    ulfius_add_header_to_response(resp, "Access-Control-Max-Age", "86400");
+}
+
+
+
+static int api_cb_options(const struct _u_request *request, struct _u_response *resp, void *user_data) {
+    add_cors_headers(resp);
+    ulfius_set_empty_body_response(resp, 200);
+    return U_OK;
+}
+
 /* get an integer value for field "key" in object "parent" */
 static int json_get_integer(int *out, json_t *parent, const char *key)
 {
@@ -125,7 +144,7 @@ static const struct value_string iso639_1_cbs_dcs_vals[] = {
 static const struct value_string ts23041_warning_type_vals[] = {
 	{ 0,	"earthquake" },
 	{ 1,	"tsunami" },
-	{ 2,	"earthquake_and_tsuname" },
+	{ 2,	"earthquake_and_tsunami" },
 	{ 3,	"test" },
 	{ 4,	"other" },
 	{ 0, NULL }
@@ -546,6 +565,7 @@ static int json2cbc_message(struct cbc_message *out, void *ctx, json_t *in, cons
 
 static int api_cb_message_post(const struct _u_request *req, struct _u_response *resp, void *user_data)
 {
+	add_cors_headers(resp);
 	struct rest_it_op *riop = talloc_zero(g_cbc, struct rest_it_op);
 	const char *errstr = "Unknown";
 	json_error_t json_err;
@@ -603,6 +623,8 @@ err:
 
 static int api_cb_message_del(const struct _u_request *req, struct _u_response *resp, void *user_data)
 {
+
+	add_cors_headers(resp);
 	const char *message_id_str = u_map_get(req->map_url, "message_id");
 	struct rest_it_op *riop = talloc_zero(g_cbc, struct rest_it_op);
 	int message_id;
@@ -719,6 +741,8 @@ int rest_api_init(void *ctx, const char *bind_addr, uint16_t port)
 
 	for (i = 0; i < ARRAY_SIZE(api_endpoints); i++)
 		ulfius_add_endpoint(&g_instance, &api_endpoints[i]);
+
+	ulfius_add_endpoint_by_val(&g_instance, "OPTIONS", "/api/ecbe/v1/message", NULL, 0, &api_cb_options, NULL);
 
 	if (ulfius_start_framework(&g_instance) != U_OK) {
 		LOGP(DREST, LOGL_FATAL, "Cannot start ECBE REST API at %s:%u\n", bind_addr, port);
