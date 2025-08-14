@@ -36,6 +36,7 @@
 #include <osmocom/cbc/cbc_vty.h>
 #include <osmocom/cbc/cbsp_link.h>
 #include <osmocom/cbc/sbcap_link.h>
+#include <osmocom/cbc/smscb_message_fsm.h>
 
 static const struct value_string cbc_peer_proto_name_vty[] = {
 	{ CBC_PEER_PROTO_CBSP, "cbsp" },
@@ -104,17 +105,20 @@ static void dump_one_cbc_msg(struct vty *vty, const struct cbc_message *cbc_msg)
 	const struct smscb_message *smscb = &cbc_msg->msg;
 	char str_created[32], str_expired[32];
 	struct tm tm_created = {0};
-	struct tm tm_expired = {0};
 
 	OSMO_ASSERT(!smscb->is_etws);
 
 	localtime_r(&cbc_msg->time.created, &tm_created);
 	strftime(str_created, sizeof(str_created), "%Y-%m-%dT%H:%M:%SZ", &tm_created);
-	if (cbc_msg->time.expired > 0) {
-		localtime_r(&cbc_msg->time.expired, &tm_expired);
-		strftime(str_expired, sizeof(str_expired), "%Y-%m-%dT%H:%M:%SZ", &tm_expired);
+
+	if (cbc_msg->fi->state == SMSCB_S_ACTIVE) {
+ 	   OSMO_STRLCPY_ARRAY(str_expired, "active");
+	} else if (cbc_msg->fi->state == SMSCB_S_EXPIRED) {
+    	   OSMO_STRLCPY_ARRAY(str_expired, "expired");
+	} else if (cbc_msg->fi->state == SMSCB_S_DELETED) {
+    	   OSMO_STRLCPY_ARRAY(str_expired, "deleted");
 	} else {
-		OSMO_STRLCPY_ARRAY(str_expired, "active");
+    	   OSMO_STRLCPY_ARRAY(str_expired, "unknown");
 	}
 
 	vty_out(vty, "|%5u|%5u|%-20s|%-13s|  %-4u|%c| %02x|%-20s|%-20s|%s",
@@ -153,26 +157,37 @@ DEFUN(show_messages_cbs, show_messages_cbs_cmd,
 	return CMD_SUCCESS;
 }
 
+
 DEFUN(delete_message_expired, delete_message_expired_cmd,
-	"delete message expired id <0-65535>",
-	"Delete message from the local expired list\n"
-	"Delete message from the local expired list\n"
-	"Delete message from the local expired list\n"
-	"Message ID\n" "Message ID\n")
+      "delete message expired id <0-65535>",
+      "Delete message from the local expired list\n"
+      "Message ID\n")
 {
-	struct cbc_message *cbc_msg;
-	uint16_t msgid = atoi(argv[0]);
-	cbc_msg = cbc_message_expired_by_id(msgid);
-	if (!cbc_msg) {
-		if (cbc_message_by_id(msgid))
-			vty_out(vty, "Message ID %s has not yet expired!%s", argv[0], VTY_NEWLINE);
-		else
-			vty_out(vty, "Unknown expired Message ID %s%s", argv[0], VTY_NEWLINE);
-		return CMD_WARNING;
-	}
-	cbc_message_free(cbc_msg);
-	return CMD_SUCCESS;
+    struct cbc_message *cbc_msg, *tmp;
+    uint16_t msgid = atoi(argv[0]);
+    int deleted = 0;
+
+    /* Iterate safely over the expired messages list */
+    llist_for_each_entry_safe(cbc_msg, tmp, &g_cbc->expired_messages, list) {
+        if (cbc_msg->msg.message_id == msgid) {
+            cbc_message_free(cbc_msg);
+            deleted++;
+        }
+    }
+
+    if (deleted == 0) {
+        if (cbc_message_by_id(msgid))
+            vty_out(vty, "Message ID %s has not yet expired!%s", argv[0], VTY_NEWLINE);
+        else
+            vty_out(vty, "Unknown expired Message ID %s%s", argv[0], VTY_NEWLINE);
+        return CMD_WARNING;
+    }
+
+    vty_out(vty, "Deleted %d expired message(s) with ID %s%s", deleted, argv[0], VTY_NEWLINE);
+    return CMD_SUCCESS;
 }
+
+
 
 static void dump_one_msg_peer(struct vty *vty, const struct cbc_message_peer *msg_peer, const char *pfx)
 {
@@ -259,20 +274,24 @@ static void dump_one_etws_msg(struct vty *vty, const struct cbc_message *cbc_msg
 	const struct smscb_message *smscb = &cbc_msg->msg;
 	char str_created[32], str_expired[32];
 	struct tm tm_created = {0};
-	struct tm tm_expired = {0};
 
 	OSMO_ASSERT(smscb->is_etws);
 
 	localtime_r(&cbc_msg->time.created, &tm_created);
 	strftime(str_created, sizeof(str_created), "%Y-%m-%dT%H:%M:%SZ", &tm_created);
-	if (cbc_msg->time.expired > 0) {
-		localtime_r(&cbc_msg->time.expired, &tm_expired);
-		strftime(str_expired, sizeof(str_expired), "%Y-%m-%dT%H:%M:%SZ", &tm_expired);
-	} else {
-		OSMO_STRLCPY_ARRAY(str_expired, "active");
-	}
+	
+        if (cbc_msg->fi->state == SMSCB_S_ACTIVE) {
+           OSMO_STRLCPY_ARRAY(str_expired, "active");
+        } else if (cbc_msg->fi->state == SMSCB_S_EXPIRED) {
+           OSMO_STRLCPY_ARRAY(str_expired, "expired");
+        } else if (cbc_msg->fi->state == SMSCB_S_DELETED) {
+           OSMO_STRLCPY_ARRAY(str_expired, "deleted");
+        } else {
+           OSMO_STRLCPY_ARRAY(str_expired, "unknown");
+        }
 
-	vty_out(vty, "| %04X| %04X|%-20s|%-13s|  %-4u|%c|        %04d|%-20s|%-20s|%s",
+
+	vty_out(vty, "|%5u|%5u|%-20s|%-13s|  %-4u|%c|        %04d|%-20s|%-20s|%s",
 		smscb->message_id, smscb->serial_nr, cbc_msg->cbe_name,
 		get_value_string(cbsp_category_names, cbc_msg->priority), cbc_msg->rep_period,
 		cbc_msg->extended_cbch ? 'E' : 'N', smscb->etws.warning_type,

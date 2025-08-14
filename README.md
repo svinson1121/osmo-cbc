@@ -99,9 +99,14 @@ the skeletons, with git possibily showing changes in the following paths:
 * added CORS support to the rest API
 * fixed typo "tsuname" -> tsunami in rest api 
 * Chanhge output of Msgid and SerNo of "show messages cbc/etws" from  HEX to DEC
-  
-@svinson1121
+
+CBC Updates - 2025-08-14
+
+- Add EXPIRED FSM state: messages automatically expire after warning_period_sec.
+- Remove warning_period_sec from REST API; calculate from Repetition Period and Number of Broadcasts (rep_period x num_bcast + 30s padding).
+- Update VTY command `delete message expired id {MsgId}` to delete all expired messages sharing the same Message ID; active messages remain unaffected.
+- Convert rep_period units to seconds per 3GPP spec (1.883s/unit) and add logging for calculated warning_period_sec.
 
 - Todo:
   * Add support in the API for PLMN and TAC in scope, so we can send alerts to a group of TACs or a specific PLMN
-  * bug?  can't send a update to a message by incrementing the serial udate number. 
+

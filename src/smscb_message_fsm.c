@@ -73,6 +73,7 @@ static void smscb_fsm_init(struct osmo_fsm_inst *fi, uint32_t event, void *data)
 	}
 }
 
+
 static void smscb_fsm_wait_write_ack(struct osmo_fsm_inst *fi, uint32_t event, void *data)
 {
 	struct cbc_message *cbcmsg = fi->priv;
@@ -89,6 +90,13 @@ static void smscb_fsm_wait_write_ack(struct osmo_fsm_inst *fi, uint32_t event, v
 		}
 		rest_it_op_set_http_result(cbcmsg->it_op, 201, "Created"); // FIXME: error cases
 		osmo_fsm_inst_state_chg(fi, SMSCB_S_ACTIVE, 0, 0);
+		if (cbcmsg->warning_period_sec != 0xffffffff) {
+		osmo_timer_schedule(&fi->timer, cbcmsg->warning_period_sec, 0);
+		fi->T = T_ACTIVE_EXPIRY;
+		LOGP(DSMSCB, LOGL_INFO,
+     		"Starting active expiry timer for message_id %u: %us",
+     		cbcmsg->msg.message_id, cbcmsg->warning_period_sec);
+		}
 		break;
 	default:
 		OSMO_ASSERT(0);
@@ -129,6 +137,17 @@ static void smscb_fsm_active(struct osmo_fsm_inst *fi, uint32_t event, void *dat
 		/* forward this event to all child FSMs (i.e. all smscb_message_peer) */
 		osmo_fsm_inst_broadcast_children(fi, SMSCB_PEER_E_DELETE, data);
 		break;
+	case SMSCB_MSG_E_EXPIRE:
+        	LOGP(DSMSCB, LOGL_INFO,
+             	"Message ID %u expired after %u seconds, moving to EXPIRED state",
+             	cbcmsg->msg.message_id, cbcmsg->warning_period_sec);
+
+        	// Move the message to the expired list
+      		llist_del(&cbcmsg->list);
+       		llist_add_tail(&cbcmsg->list, &g_cbc->expired_messages);
+        	// Transition FSM state to EXPIRED
+      		 osmo_fsm_inst_state_chg(fi, SMSCB_S_EXPIRED, 0, 0);
+        	break;
 	default:
 		OSMO_ASSERT(0);
 	}
@@ -148,6 +167,13 @@ static void smscb_fsm_wait_replace_ack(struct osmo_fsm_inst *fi, uint32_t event,
 		}
 		rest_it_op_set_http_result(cbcmsg->it_op, 200, "OK"); // FIXME: error cases
 		osmo_fsm_inst_state_chg(fi, SMSCB_S_ACTIVE, 0, 0);
+		if (cbcmsg->warning_period_sec != 0xffffffff) {
+		osmo_timer_schedule(&fi->timer, cbcmsg->warning_period_sec, 0);
+		fi->T = T_ACTIVE_EXPIRY;
+		LOGP(DSMSCB, LOGL_INFO,
+  		"Starting active expiry timer for message_id %u: %us",
+ 		cbcmsg->msg.message_id, cbcmsg->warning_period_sec);
+		}
 		break;
 	default:
 		OSMO_ASSERT(0);
@@ -176,6 +202,13 @@ static void smscb_fsm_wait_status_ack(struct osmo_fsm_inst *fi, uint32_t event, 
 		}
 		rest_it_op_set_http_result(cbcmsg->it_op, 200, "OK"); // FIXME: error cases
 		osmo_fsm_inst_state_chg(fi, SMSCB_S_ACTIVE, 0, 0);
+		if (cbcmsg->warning_period_sec != 0xffffffff) {
+		osmo_timer_schedule(&fi->timer, cbcmsg->warning_period_sec, 0);
+		fi->T = T_ACTIVE_EXPIRY;
+		LOGP(DSMSCB, LOGL_INFO,
+    		"Starting active expiry timer for message_id %u: %us",
+   		cbcmsg->msg.message_id, cbcmsg->warning_period_sec);
+		}
 		break;
 	default:
 		OSMO_ASSERT(0);
@@ -222,6 +255,9 @@ static void smscb_fsm_wait_delete_ack_onleave(struct osmo_fsm_inst *fi, uint32_t
 
 static void smscb_fsm_deleted_onenter(struct osmo_fsm_inst *fi, uint32_t old_state)
 {
+	/* Stop the active expiry timer if it's running */
+	osmo_timer_del(&fi->timer);
+
 	/* release the mutex from the REST interface, then destroy */
 	struct cbc_message *cbcmsg = fi->priv;
 	if (cbcmsg->it_op) {
@@ -233,6 +269,42 @@ static void smscb_fsm_deleted_onenter(struct osmo_fsm_inst *fi, uint32_t old_sta
 	llist_add_tail(&cbcmsg->list, &g_cbc->expired_messages);
 	cbcmsg->time.expired = time(NULL);
 }
+
+
+/*
+static void smscb_fsm_active_onevent(struct osmo_fsm_inst *fi, uint32_t event, void *data)
+{
+    struct cbc_message *cbcmsg = fi->priv;
+
+    switch (event) {
+    case SMSCB_MSG_E_EXPIRE:
+        LOGP(DSMSCB, LOGL_INFO, "Message ID %u moving to EXPIRED state", 
+             cbcmsg->msg.message_id);
+
+        llist_del(&cbcmsg->list);
+        llist_add_tail(&cbcmsg->list, &g_cbc->expired_messages);
+
+        osmo_fsm_inst_state_chg(fi, SMSCB_S_EXPIRED, 0, 0);
+        break;
+
+    default:
+        OSMO_ASSERT(0);
+    }
+}
+*/
+
+static void smscb_fsm_expired_onenter(struct osmo_fsm_inst *fi, uint32_t old_state)
+{
+    struct cbc_message *cbcmsg = fi->priv;
+
+    if (cbcmsg->it_op) {
+        rest_it_op_complete(cbcmsg->it_op);
+        cbcmsg->it_op = NULL;
+    }
+
+    LOGP(DSMSCB, LOGL_INFO, "Message ID %u is now EXPIRED", cbcmsg->msg.message_id);
+}
+	
 
 static struct osmo_fsm_state smscb_fsm_states[] = {
 	[SMSCB_S_INIT] = {
@@ -253,11 +325,13 @@ static struct osmo_fsm_state smscb_fsm_states[] = {
 		.name = "ACTIVE",
 		.in_event_mask = S(SMSCB_MSG_E_REPLACE) |
 				 S(SMSCB_MSG_E_STATUS) |
-				 S(SMSCB_MSG_E_DELETE),
+				 S(SMSCB_MSG_E_DELETE) |
+				  S(SMSCB_MSG_E_EXPIRE), 
 		.out_state_mask = S(SMSCB_S_ACTIVE) |
 				  S(SMSCB_S_WAIT_REPLACE_ACK) |
 				  S(SMSCB_S_WAIT_STATUS_ACK) |
-				  S(SMSCB_S_WAIT_DELETE_ACK),
+				  S(SMSCB_S_WAIT_DELETE_ACK) |
+				  S(SMSCB_S_EXPIRED), 
 		.action = smscb_fsm_active,
 	},
 	[SMSCB_S_WAIT_REPLACE_ACK] = {
@@ -291,10 +365,17 @@ static struct osmo_fsm_state smscb_fsm_states[] = {
 		.onenter = smscb_fsm_deleted_onenter,
 		//.action = smscb_fsm_deleted,
 	},
+	/* Add EXPIRED state to FSM */
+	[SMSCB_S_EXPIRED] = {
+   		 .onenter = smscb_fsm_expired_onenter,
+	},
+
 };
 
 static int smscb_fsm_timer_cb(struct osmo_fsm_inst *fi)
 {
+	struct cbc_message *cbcmsg = fi->priv;
+
 	switch (fi->T) {
 	case T_WAIT_WRITE_ACK:
 		/* onleave will take care of notifying the user */
@@ -312,6 +393,12 @@ static int smscb_fsm_timer_cb(struct osmo_fsm_inst *fi)
 		/* onleave will take care of notifying the user */
 		osmo_fsm_inst_state_chg(fi, SMSCB_S_DELETED, 0, 0);
 		break;
+	case T_ACTIVE_EXPIRY:
+		 LOGP(DSMSCB, LOGL_INFO, "Message ID %u expired after %u seconds",
+           	  cbcmsg->msg.message_id, cbcmsg->warning_period_sec);
+       		 osmo_fsm_inst_dispatch(fi, SMSCB_MSG_E_EXPIRE, NULL);
+        	 break;
+
 	default:
 		OSMO_ASSERT(0);
 	}

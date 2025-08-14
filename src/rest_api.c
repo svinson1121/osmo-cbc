@@ -525,16 +525,6 @@ static int json2cbc_message(struct cbc_message *out, void *ctx, json_t *in, cons
 		return rc;
 	}
 
-	/* Warning Period in seconds (O) */
-	rc = json_get_integer_range(&tmp, in, "warning_period_sec", 0, 65535);
-	if (rc == 0)
-		out->warning_period_sec = tmp;
-	else if (rc == -ENOENT)
-		out->warning_period_sec = 0xffffffff; /* infinite */
-	else {
-		*errstr = "CBCMSG 'warning_period_sec' out of range";
-		return rc;
-	}
 
 	/* [Geographic] Scope (M) */
 	jtmp = json_object_get(in, "scope");

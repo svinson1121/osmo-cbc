@@ -96,48 +96,74 @@ int peer_new_cbc_message(struct cbc_peer *peer, struct cbc_message *cbcmsg)
 	}
 }
 
+
 /* receive a new CBC message from the user (REST). Allocates new memory,
  * a FSM, copies data from 'orig', routes to all peers and starts FSMs.
  * Once the operation is complete (success, error, timeout) we must
  * notify osmo_it_q of the completion */
 int cbc_message_new(const struct cbc_message *orig, struct rest_it_op *op)
 {
-	struct cbc_message *cbcmsg = cbc_message_alloc(g_cbc, orig);
-	struct cbc_peer *peer;
+    struct cbc_message *cbcmsg = cbc_message_alloc(g_cbc, orig);
+    struct cbc_peer *peer;
+    const int WARNING_PERIOD_PADDING = 30; /* seconds */
 
-	if (!cbcmsg) {
-		rest_it_op_set_http_result(op, 409, "Could not allocate");
-		rest_it_op_complete(op);
-		return -ENOMEM;
-	}
+    if (!cbcmsg) {
+        rest_it_op_set_http_result(op, 409, "Could not allocate");
+        rest_it_op_complete(op);
+        return -ENOMEM;
+    }
 
-	OSMO_ASSERT(llist_empty(&cbcmsg->peers));
+	/* Calculate warning_period_sec from repetition period and number of broadcasts */
+ 	if (cbcmsg->rep_period > 0 && cbcmsg->num_bcast > 0) {
+        	/* rep_period is in units of 1.883s (3GPP), convert to seconds as double */
+       		 double rep_period_sec = cbcmsg->rep_period * 1.883;
 
-	/* iterate over all peers */
-	llist_for_each_entry(peer, &g_cbc->peers, list) {
-		struct cbc_message_peer *mp;
+        /* Total warning period = rep_period * num_bcast + padding, rounded to nearest second */
+        cbcmsg->warning_period_sec = (int)(rep_period_sec * cbcmsg->num_bcast
+                                           + WARNING_PERIOD_PADDING + 0.5);
+   
 
-		if (!is_peer_in_scope(peer, cbcmsg))
-			continue;
-
-		/* allocate new cbc_mesage_peer + related FSM */
-		mp = smscb_peer_fsm_alloc(peer, cbcmsg);
-		if (!mp) {
-			LOGP(DCBSP, LOGL_ERROR, "Cannot allocate cbc_message_peer\n");
-			continue;
-		}
-	}
-
-	/* kick off the state machine[s] */
-	if (osmo_fsm_inst_dispatch(cbcmsg->fi, SMSCB_MSG_E_CREATE, op) < 0) {
-		rest_it_op_set_http_result(op, 500, "Illegal FSM event");
-		rest_it_op_complete(op);
-	}
-
-	/* we continue in the FSM after the WRITE_ACK event was received */
-
-	return 0;
+   	 LOGP(DCBSP, LOGL_INFO,
+            "Calculated warning_period_sec: %u sec "
+            "(rep_period=%u, num_bcast=%u, padding=%d)\n",
+            cbcmsg->warning_period_sec, cbcmsg->rep_period,
+            cbcmsg->num_bcast, WARNING_PERIOD_PADDING);
+	} else {
+    	    cbcmsg->warning_period_sec = 0; /* fallback */
+            LOGP(DCBSP, LOGL_INFO,
+               "Warning period not calculated (rep_period=%u, num_bcast=%u)\n",
+            cbcmsg->rep_period, cbcmsg->num_bcast);
 }
+
+
+
+    OSMO_ASSERT(llist_empty(&cbcmsg->peers));
+
+    /* iterate over all peers */
+    llist_for_each_entry(peer, &g_cbc->peers, list) {
+        struct cbc_message_peer *mp;
+
+        if (!is_peer_in_scope(peer, cbcmsg))
+            continue;
+
+        /* allocate new cbc_message_peer + related FSM */
+        mp = smscb_peer_fsm_alloc(peer, cbcmsg);
+        if (!mp) {
+            LOGP(DCBSP, LOGL_ERROR, "Cannot allocate cbc_message_peer\n");
+            continue;
+        }
+    }
+
+    /* kick off the state machine[s] */
+    if (osmo_fsm_inst_dispatch(cbcmsg->fi, SMSCB_MSG_E_CREATE, op) < 0) {
+        rest_it_op_set_http_result(op, 500, "Illegal FSM event");
+        rest_it_op_complete(op);
+    }
+
+    return 0;
+}
+
+
 
 void cbc_message_delete(struct cbc_message *cbcmsg, struct rest_it_op *op)
 {

@@ -15,11 +15,6 @@
 		"channel_indicator": {
 			"enum": [ "basic", "extended" ]
 		},
-		"warning_period_sec": {
-			"type": "integer",
-			"minimum": 0,
-			"maximum": 3600
-		},
 		"number_of_broadcasts": {
 			"type": "integer",
 			"minimum": 0,
@@ -41,7 +36,6 @@
 				"repetition_period": { "$ref": "#/definitions/repetition_period" },
 				"num_of_bcast": { "$ref": "#/definitions/number_of_broadcasts" },
 				"scope": { "$ref": "#/definitions/scope" },
-				"warning_period_sec": { "$ref": "#/definitions/warning_period_sec" },
 				"smscb_message": { "$ref": "smscb.schema.json#definitions/smscb_message" }
 			},
 			"required": [ "scope", "smscb" }

@@ -24,7 +24,8 @@ enum smscb_message_fsm_event {
 	SMSCB_MSG_E_DELETE_NACK,
 	/* peer confirms status query */
 	SMSCB_MSG_E_STATUS_ACK,
-	SMSCB_MSG_E_STATUS_NACK
+	SMSCB_MSG_E_STATUS_NACK,
+	SMSCB_MSG_E_EXPIRE
 };
 
 enum smscb_fsm_state {
@@ -41,6 +42,7 @@ enum smscb_fsm_state {
 	/* we have deleted the message and sent KILL to peer; wait for ACK */
 	SMSCB_S_WAIT_DELETE_ACK,
 	SMSCB_S_DELETED,
+	SMSCB_S_EXPIRED
 };
 
 enum smscb_p_fsm_timer {
@@ -48,6 +50,7 @@ enum smscb_p_fsm_timer {
 	T_WAIT_REPLACE_ACK,
 	T_WAIT_STATUS_ACK,
 	T_WAIT_DELETE_ACK,
+	T_ACTIVE_EXPIRY
 };
 
 extern const struct value_string smscb_message_fsm_event_names[];
